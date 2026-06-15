@@ -25,6 +25,11 @@ public final class YlCompletionSettingsState implements PersistentStateComponent
     public int contextMaxChars = 4000;
     public int triggerMinPrefixLength = 1;
     public String disabledExtensions = "";
+    /**
+     * 标记 keychain 里是否存有 API key，用于 UI 显示 "&lt;stored&gt;" 占位，
+     * 避免每次打开设置页都去读 keychain 弹密码框。
+     */
+    public boolean hasApiKey = false;
 
     public static YlCompletionSettingsState getInstance() {
         return ApplicationManager.getApplication().getService(YlCompletionSettingsState.class);

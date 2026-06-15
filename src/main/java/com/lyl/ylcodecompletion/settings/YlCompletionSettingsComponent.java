@@ -18,6 +18,8 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSpinner;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.util.concurrent.CompletionException;
@@ -46,9 +48,26 @@ public final class YlCompletionSettingsComponent {
     private final JButton resetButton = new JButton(YlMessageBundle.message("settings.button.reset"));
     private final JLabel testStatusLabel = new JLabel(" ");
 
+    /**
+     * 用户是否动过 API Key 输入框。
+     * - false：UI 显示空 + placeholder "&lt;stored&gt;"，apply 时不写 keychain。
+     * - true：apply 时把输入框内容写入 keychain（空字符串则清除）。
+     * 注意：用户主动清空也算 dirty。
+     */
+    private boolean apiKeyDirty = false;
+    private boolean suppressDirty = false;
+
     public YlCompletionSettingsComponent() {
         baseUrlField.getEmptyText().setText("https://api.deepseek.com/beta");
         modelField.getEmptyText().setText("deepseek-v4-pro");
+
+        // 监听输入框变化标记 dirty
+        apiKeyField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { mark(); }
+            @Override public void removeUpdate(DocumentEvent e) { mark(); }
+            @Override public void changedUpdate(DocumentEvent e) { mark(); }
+            private void mark() { if (!suppressDirty) apiKeyDirty = true; }
+        });
 
         JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         buttonRow.add(testConnectionButton);
@@ -87,11 +106,10 @@ public final class YlCompletionSettingsComponent {
         return root;
     }
 
-    public void load(YlCompletionSettingsState state, String apiKey) {
+    public void load(YlCompletionSettingsState state) {
         enabledBox.setSelected(state.enabled);
         baseUrlField.setText(state.baseUrl);
         modelField.setText(state.model);
-        apiKeyField.setText(apiKey == null ? "" : apiKey);
         maxTokensSpinner.setValue(state.maxTokens);
         temperatureSpinner.setValue(state.temperature);
         topPSpinner.setValue(state.topP);
@@ -101,6 +119,18 @@ public final class YlCompletionSettingsComponent {
         triggerMinPrefixSpinner.setValue(state.triggerMinPrefixLength);
         disabledExtensionsField.setText(state.disabledExtensions);
         testStatusLabel.setText(" ");
+
+        // 重置 API Key 输入框：清空、显示 placeholder、不算 dirty
+        suppressDirty = true;
+        try {
+            apiKeyField.setText("");
+            apiKeyField.getEmptyText().setText(state.hasApiKey
+                    ? YlMessageBundle.message("settings.field.apiKey.storedPlaceholder")
+                    : YlMessageBundle.message("settings.field.apiKey.emptyPlaceholder"));
+        } finally {
+            suppressDirty = false;
+            apiKeyDirty = false;
+        }
     }
 
     public void apply(YlCompletionSettingsState state) {
@@ -117,16 +147,30 @@ public final class YlCompletionSettingsComponent {
         state.disabledExtensions = disabledExtensionsField.getText().trim();
     }
 
+    public boolean isApiKeyDirty() {
+        return apiKeyDirty;
+    }
+
+    /** 用户输入的新 API key；apply 后调用方负责重置 dirty 标志。 */
     public String getApiKey() {
         char[] pwd = apiKeyField.getPassword();
         return pwd == null ? "" : new String(pwd);
     }
 
-    public void setApiKey(String apiKey) {
-        apiKeyField.setText(apiKey == null ? "" : apiKey);
+    public void resetApiKeyDirty(boolean hasApiKey) {
+        suppressDirty = true;
+        try {
+            apiKeyField.setText("");
+            apiKeyField.getEmptyText().setText(hasApiKey
+                    ? YlMessageBundle.message("settings.field.apiKey.storedPlaceholder")
+                    : YlMessageBundle.message("settings.field.apiKey.emptyPlaceholder"));
+        } finally {
+            suppressDirty = false;
+            apiKeyDirty = false;
+        }
     }
 
-    public boolean isModifiedExceptApiKey(YlCompletionSettingsState state) {
+    public boolean isModified(YlCompletionSettingsState state) {
         if (state.enabled != enabledBox.isSelected()) return true;
         if (!state.baseUrl.equals(baseUrlField.getText().trim())) return true;
         if (!state.model.equals(modelField.getText().trim())) return true;
@@ -137,19 +181,15 @@ public final class YlCompletionSettingsComponent {
         if (state.timeoutMs != ((Number) timeoutMsSpinner.getValue()).intValue()) return true;
         if (state.contextMaxChars != ((Number) contextMaxCharsSpinner.getValue()).intValue()) return true;
         if (state.triggerMinPrefixLength != ((Number) triggerMinPrefixSpinner.getValue()).intValue()) return true;
-        return !state.disabledExtensions.equals(disabledExtensionsField.getText().trim());
-    }
-
-    public boolean isModified(YlCompletionSettingsState state, String storedApiKey) {
-        if (isModifiedExceptApiKey(state)) return true;
-        String currentKey = getApiKey();
-        String stored = storedApiKey == null ? "" : storedApiKey;
-        return !currentKey.equals(stored);
+        if (!state.disabledExtensions.equals(disabledExtensionsField.getText().trim())) return true;
+        return apiKeyDirty;
     }
 
     private void resetToDefaults() {
+        // 重置时把 keychain 里的 key 也清掉（视为用户主动删除）
         YlCompletionSettingsState defaults = new YlCompletionSettingsState();
-        load(defaults, "");
+        load(defaults);
+        apiKeyDirty = true;
     }
 
     private void testConnection() {
@@ -158,33 +198,37 @@ public final class YlCompletionSettingsComponent {
 
         String baseUrl = baseUrlField.getText().trim();
         String model = modelField.getText().trim();
-        String apiKey = getApiKey();
         int timeoutMs = ((Number) timeoutMsSpinner.getValue()).intValue();
-
+        // 用户在输入框输入了新 key → 用新 key 测试；否则用 keychain 缓存里的 key
+        String typedKey = getApiKey();
         ModalityState modality = ModalityState.stateForComponent(root);
-        DeepSeekFimClient.getInstance()
-                .testConnection(apiKey, baseUrl, model, timeoutMs)
-                .whenComplete((v, err) ->
-                        ApplicationManager.getApplication().invokeLater(() -> {
-                            testConnectionButton.setEnabled(true);
-                            if (err == null) {
-                                testStatusLabel.setText(YlMessageBundle.message("settings.test.success"));
-                                Messages.showInfoMessage(root,
-                                        YlMessageBundle.message("settings.test.success"),
+
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            String apiKey = typedKey.isEmpty() ? YlPasswordSafe.loadApiKey() : typedKey;
+            DeepSeekFimClient.getInstance()
+                    .testConnection(apiKey, baseUrl, model, timeoutMs)
+                    .whenComplete((v, err) ->
+                            ApplicationManager.getApplication().invokeLater(() -> {
+                                testConnectionButton.setEnabled(true);
+                                if (err == null) {
+                                    testStatusLabel.setText(YlMessageBundle.message("settings.test.success"));
+                                    Messages.showInfoMessage(root,
+                                            YlMessageBundle.message("settings.test.success"),
+                                            YlMessageBundle.message("settings.test.title"));
+                                    return;
+                                }
+                                Throwable cause = err instanceof CompletionException ? err.getCause() : err;
+                                String msg;
+                                if (cause instanceof LlmException llm && llm.getKind() == LlmException.Kind.AUTH) {
+                                    msg = YlMessageBundle.message("settings.test.authFailed");
+                                } else {
+                                    msg = YlMessageBundle.message("settings.test.failed",
+                                            cause == null ? "unknown" : cause.getMessage());
+                                }
+                                testStatusLabel.setText(msg);
+                                Messages.showErrorDialog(root, msg,
                                         YlMessageBundle.message("settings.test.title"));
-                                return;
-                            }
-                            Throwable cause = err instanceof CompletionException ? err.getCause() : err;
-                            String msg;
-                            if (cause instanceof LlmException llm && llm.getKind() == LlmException.Kind.AUTH) {
-                                msg = YlMessageBundle.message("settings.test.authFailed");
-                            } else {
-                                msg = YlMessageBundle.message("settings.test.failed",
-                                        cause == null ? "unknown" : cause.getMessage());
-                            }
-                            testStatusLabel.setText(msg);
-                            Messages.showErrorDialog(root, msg,
-                                    YlMessageBundle.message("settings.test.title"));
-                        }, modality));
+                            }, modality));
+        });
     }
 }
