@@ -4,6 +4,8 @@
 
 **一款轻量的 IntelliJ IDEA 代码补全插件，提供类 Copilot 的 inline 补全体验，由 [DeepSeek FIM](https://api-docs.deepseek.com/zh-cn/api/create-completion) 驱动。**
 
+[![Build](https://github.com/Lee0110/yl-code-completion/actions/workflows/build.yml/badge.svg)](https://github.com/Lee0110/yl-code-completion/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/Lee0110/yl-code-completion?label=release)](https://github.com/Lee0110/yl-code-completion/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![JetBrains Plugin](https://img.shields.io/badge/JetBrains-IntelliJ%20IDEA%202025.2%2B-000?logo=intellijidea)](https://www.jetbrains.com/idea/)
 [![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk)](https://openjdk.org/projects/jdk/21/)
@@ -28,7 +30,13 @@
 
 ## 📦 安装
 
-> Marketplace 发布**尚未上架**，目前请从源码构建。
+### 方式一：从 Releases 下载（推荐）
+
+到 [Releases](https://github.com/Lee0110/yl-code-completion/releases/latest) 页面下载最新的 `yl-code-completion-*.zip`，然后在 IDE 中：
+
+`Settings → Plugins → ⚙️ → Install Plugin from Disk...` 选中刚下载的 zip → 重启 IDE。
+
+### 方式二：从源码构建
 
 ```bash
 git clone git@github.com:Lee0110/yl-code-completion.git
@@ -36,15 +44,11 @@ cd yl-code-completion
 ./gradlew buildPlugin
 ```
 
-打包产物会出现在 `build/distributions/yl-code-completion-*.zip`。在 IDE 中通过 `Settings → Plugins → ⚙️ → Install Plugin from Disk...` 安装。
+打包产物在 `build/distributions/yl-code-completion-*.zip`，同样通过 `Install Plugin from Disk...` 安装。
 
-也可以直接启动一个沙箱 IDE 调试：
+也可以直接启动沙箱 IDE 调试：`./gradlew runIde`
 
-```bash
-./gradlew runIde
-```
-
-> **环境要求**：Java 21 · 本机已安装 IntelliJ IDEA 2025.2+，路径默认为 `/Applications/IntelliJ IDEA.app`（可在 `build.gradle.kts` 修改）
+> **环境要求**：Java 21 · 本机已安装 IntelliJ IDEA 2025.2+（仅本地构建需要；从 Releases 下载无任何额外依赖）
 
 ## 🚀 快速开始
 
