@@ -1,0 +1,48 @@
+<!-- Plugin Configuration File: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+    <id>com.lyl.yl-code-completion</id>
+
+    <name>YL Code Completion</name>
+
+    <vendor url="https://github.com/Lee0110">Lee0110</vendor>
+
+    <description><![CDATA[
+        Inline AI code completion powered by DeepSeek FIM.<br>
+        <em>Type code, pause, accept gray suggestion with Tab, dismiss with Esc.</em>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+
+    <resource-bundle>messages.YlMessageBundle</resource-bundle>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService
+                serviceImplementation="com.lyl.ylcodecompletion.settings.YlCompletionSettingsState"/>
+        <applicationService
+                serviceImplementation="com.lyl.ylcodecompletion.llm.DeepSeekFimClient"/>
+        <applicationService
+                serviceImplementation="com.lyl.ylcodecompletion.status.YlBusyState"/>
+        <applicationConfigurable
+                parentId="tools"
+                id="com.lyl.ylcodecompletion.settings"
+                instance="com.lyl.ylcodecompletion.settings.YlCompletionSettingsConfigurable"
+                displayName="YL Code Completion"/>
+        <inline.completion.provider
+                implementation="com.lyl.ylcodecompletion.ghost.YlInlineCompletionProvider"/>
+        <statusBarWidgetFactory
+                id="YlCodeCompletion.StatusBar"
+                implementation="com.lyl.ylcodecompletion.status.YlStatusBarWidgetFactory"
+                order="last"/>
+    </extensions>
+
+    <actions>
+        <action id="YlCodeCompletion.TriggerInlineCompletion"
+                class="com.lyl.ylcodecompletion.ghost.YlTriggerInlineCompletionAction"
+                text="Trigger YL Inline Completion"
+                description="Manually request an inline completion suggestion from DeepSeek FIM">
+            <keyboard-shortcut keymap="$default" first-keystroke="alt BACK_SLASH"/>
+            <add-to-group group-id="EditorActions" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
