@@ -139,13 +139,52 @@ public final class DeepSeekFimClient {
                     ? first.get("text").getAsString() : "";
             String finish = first.has("finish_reason") && !first.get("finish_reason").isJsonNull()
                     ? first.get("finish_reason").getAsString() : null;
-            return new LlmResponse(text, finish);
+            String model = root.has("model") && !root.get("model").isJsonNull()
+                    ? root.get("model").getAsString() : null;
+            LlmUsage usage = root.has("usage") && root.get("usage").isJsonObject()
+                    ? parseUsage(root.getAsJsonObject("usage")) : null;
+            return new LlmResponse(text, finish, model, usage);
         } catch (LlmException e) {
             throw e;
         } catch (Exception e) {
             LOG.debug("Failed to parse FIM response: " + bodyText, e);
             throw new LlmException(LlmException.Kind.UNKNOWN,
                     "Failed to parse response: " + e.getMessage(), e);
+        }
+    }
+
+    private static @NotNull LlmUsage parseUsage(@NotNull JsonObject usage) {
+        long promptTokens = longValue(usage, "prompt_tokens");
+        long completionTokens = longValue(usage, "completion_tokens");
+        long totalTokens = longValue(usage, "total_tokens");
+        long promptCacheHitTokens = longValue(usage, "prompt_cache_hit_tokens");
+        long promptCacheMissTokens = longValue(usage, "prompt_cache_miss_tokens");
+
+        if (promptCacheHitTokens == 0 && usage.has("prompt_tokens_details")
+                && usage.get("prompt_tokens_details").isJsonObject()) {
+            promptCacheHitTokens = longValue(
+                    usage.getAsJsonObject("prompt_tokens_details"),
+                    "cached_tokens"
+            );
+        }
+
+        return new LlmUsage(
+                promptTokens,
+                completionTokens,
+                totalTokens,
+                promptCacheHitTokens,
+                promptCacheMissTokens
+        );
+    }
+
+    private static long longValue(@NotNull JsonObject object, @NotNull String key) {
+        if (!object.has(key) || object.get(key).isJsonNull()) {
+            return 0;
+        }
+        try {
+            return object.get(key).getAsLong();
+        } catch (Exception ignored) {
+            return 0;
         }
     }
 

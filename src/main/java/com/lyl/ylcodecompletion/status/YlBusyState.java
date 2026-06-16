@@ -1,17 +1,19 @@
 package com.lyl.ylcodecompletion.status;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.messages.Topic;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 全局补全状态：负责单飞守门 + 状态广播。
+ * 全局补全状态：状态广播 + 在飞计数。
  * <p>
- * 单飞策略：当一次请求在飞时，{@link #tryStart()} 直接返回 false，新请求被丢弃。
+ * 不做单飞守门 —— 由 IntelliJ inline completion 框架在新事件到来时
+ * 自动 cancel 旧的 {@code getSuggestion} 协程；调用方仅需配对 {@link #start()}
+ * 与 {@link #finishOk()} / {@link #finishError()} / {@link #finishCancelled()}。
  */
 public final class YlBusyState {
 
@@ -28,37 +30,50 @@ public final class YlBusyState {
     public static final Topic<Listener> TOPIC =
             Topic.create("YlBusyState", Listener.class);
 
-    private static final Logger LOG = Logger.getInstance(YlBusyState.class);
-
-    private final AtomicBoolean inFlight = new AtomicBoolean(false);
+    private final AtomicInteger inFlight = new AtomicInteger(0);
     private final AtomicReference<Status> status = new AtomicReference<>(Status.IDLE);
+    private final AtomicBoolean errorPending = new AtomicBoolean(false);
 
     public static YlBusyState getInstance() {
         return ApplicationManager.getApplication().getService(YlBusyState.class);
     }
 
     /**
-     * 尝试占座。返回 true 表示拿到坑位，调用方负责在结束后调用 {@link #finishOk()} / {@link #finishError()}。
-     * 返回 false 表示已有请求在飞，调用方应直接放弃。
+     * 标记一次请求开始。每次 {@code start()} 必须配对一次 finish*。
+     * 进入新一轮 try 时清掉 pending error，避免被旧错误绑架。
      */
-    public boolean tryStart() {
-        if (!inFlight.compareAndSet(false, true)) {
-            LOG.debug("YlBusyState: request rejected, another in flight");
-            return false;
-        }
+    public void start() {
+        inFlight.incrementAndGet();
+        errorPending.set(false);
         publish(Status.LOADING);
-        return true;
     }
 
     public void finishOk() {
-        if (inFlight.compareAndSet(true, false)) {
-            publish(Status.IDLE);
-        }
+        finish(Status.IDLE);
     }
 
     public void finishError() {
-        if (inFlight.compareAndSet(true, false)) {
-            publish(Status.ERROR);
+        errorPending.set(true);
+        finish(Status.ERROR);
+    }
+
+    /**
+     * 协程被 cancel（用户继续输入触发新请求）时调用。不进入 ERROR。
+     */
+    public void finishCancelled() {
+        finish(Status.IDLE);
+    }
+
+    private void finish(@NotNull Status onLastStatus) {
+        int now = inFlight.decrementAndGet();
+        if (now < 0) {
+            inFlight.set(0);
+            return;
+        }
+        if (now == 0) {
+            // pending error 优先：只要本批次内任一请求失败过，最终一定 publish ERROR
+            Status finalStatus = errorPending.compareAndSet(true, false) ? Status.ERROR : onLastStatus;
+            publish(finalStatus);
         }
     }
 
@@ -67,7 +82,7 @@ public final class YlBusyState {
     }
 
     public boolean isInFlight() {
-        return inFlight.get();
+        return inFlight.get() > 0;
     }
 
     private void publish(@NotNull Status next) {

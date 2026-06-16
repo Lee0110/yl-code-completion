@@ -5,6 +5,8 @@ import org.jetbrains.annotations.Nullable;
 
 public record LlmResponse(
         @NotNull String text,
-        @Nullable String finishReason
+        @Nullable String finishReason,
+        @Nullable String model,
+        @Nullable LlmUsage usage
 ) {
 }

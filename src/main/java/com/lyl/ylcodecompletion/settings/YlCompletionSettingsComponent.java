@@ -12,14 +12,14 @@ import com.intellij.util.ui.JBUI;
 import com.lyl.ylcodecompletion.YlMessageBundle;
 import com.lyl.ylcodecompletion.llm.DeepSeekFimClient;
 import com.lyl.ylcodecompletion.llm.LlmException;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSpinner;
 import javax.swing.SpinnerNumberModel;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.util.concurrent.CompletionException;
@@ -32,15 +32,22 @@ public final class YlCompletionSettingsComponent {
     private final JBTextField baseUrlField = new JBTextField();
     private final JBPasswordField apiKeyField = new JBPasswordField();
     private final JBTextField modelField = new JBTextField();
-    private final JBIntSpinner maxTokensSpinner = new JBIntSpinner(128, 1, 4096);
+    private final JBIntSpinner maxTokensSpinner = new JBIntSpinner(
+            YlCompletionSettingsState.DEFAULT_MAX_TOKENS, 1, 4096);
     private final JSpinner temperatureSpinner =
-            new JSpinner(new SpinnerNumberModel(0.2, 0.0, 2.0, 0.1));
+            new JSpinner(new SpinnerNumberModel(
+                    YlCompletionSettingsState.DEFAULT_TEMPERATURE, 0.0, 2.0, 0.05));
     private final JSpinner topPSpinner =
-            new JSpinner(new SpinnerNumberModel(0.95, 0.0, 1.0, 0.05));
-    private final JBIntSpinner debounceMsSpinner = new JBIntSpinner(300, 0, 10_000);
-    private final JBIntSpinner timeoutMsSpinner = new JBIntSpinner(8000, 1000, 60_000);
-    private final JBIntSpinner contextMaxCharsSpinner = new JBIntSpinner(4000, 200, 200_000);
-    private final JBIntSpinner triggerMinPrefixSpinner = new JBIntSpinner(1, 0, 100);
+            new JSpinner(new SpinnerNumberModel(
+                    YlCompletionSettingsState.DEFAULT_TOP_P, 0.0, 1.0, 0.05));
+    private final JBIntSpinner debounceMsSpinner = new JBIntSpinner(
+            YlCompletionSettingsState.DEFAULT_DEBOUNCE_MS, 0, 10_000);
+    private final JBIntSpinner timeoutMsSpinner = new JBIntSpinner(
+            YlCompletionSettingsState.DEFAULT_TIMEOUT_MS, 1000, 60_000);
+    private final JBIntSpinner contextMaxCharsSpinner = new JBIntSpinner(
+            YlCompletionSettingsState.DEFAULT_CONTEXT_MAX_CHARS, 200, 200_000);
+    private final JBIntSpinner triggerMinPrefixSpinner = new JBIntSpinner(
+            YlCompletionSettingsState.DEFAULT_TRIGGER_MIN_PREFIX_LENGTH, 0, 100);
     private final JBTextField disabledExtensionsField = new JBTextField();
 
     private final JButton testConnectionButton = new JButton(
@@ -48,26 +55,11 @@ public final class YlCompletionSettingsComponent {
     private final JButton resetButton = new JButton(YlMessageBundle.message("settings.button.reset"));
     private final JLabel testStatusLabel = new JLabel(" ");
 
-    /**
-     * 用户是否动过 API Key 输入框。
-     * - false：UI 显示空 + placeholder "&lt;stored&gt;"，apply 时不写 keychain。
-     * - true：apply 时把输入框内容写入 keychain（空字符串则清除）。
-     * 注意：用户主动清空也算 dirty。
-     */
-    private boolean apiKeyDirty = false;
-    private boolean suppressDirty = false;
-
     public YlCompletionSettingsComponent() {
-        baseUrlField.getEmptyText().setText("https://api.deepseek.com/beta");
-        modelField.getEmptyText().setText("deepseek-v4-pro");
-
-        // 监听输入框变化标记 dirty
-        apiKeyField.getDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent e) { mark(); }
-            @Override public void removeUpdate(DocumentEvent e) { mark(); }
-            @Override public void changedUpdate(DocumentEvent e) { mark(); }
-            private void mark() { if (!suppressDirty) apiKeyDirty = true; }
-        });
+        baseUrlField.getEmptyText().setText(YlCompletionSettingsState.DEFAULT_BASE_URL);
+        apiKeyField.getEmptyText().setText(YlMessageBundle.message("settings.field.apiKey.emptyPlaceholder"));
+        modelField.getEmptyText().setText(YlCompletionSettingsState.DEFAULT_MODEL);
+        installTooltips();
 
         JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         buttonRow.add(testConnectionButton);
@@ -77,18 +69,18 @@ public final class YlCompletionSettingsComponent {
         JPanel form = FormBuilder.createFormBuilder()
                 .addComponent(enabledBox)
                 .addSeparator()
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.baseUrl")), baseUrlField)
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.apiKey")), apiKeyField)
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.model")), modelField)
+                .addLabeledComponent(label("settings.field.baseUrl", "settings.tooltip.baseUrl"), baseUrlField)
+                .addLabeledComponent(label("settings.field.apiKey", "settings.tooltip.apiKey"), apiKeyField)
+                .addLabeledComponent(label("settings.field.model", "settings.tooltip.model"), modelField)
                 .addSeparator()
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.maxTokens")), maxTokensSpinner)
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.temperature")), temperatureSpinner)
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.topP")), topPSpinner)
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.debounceMs")), debounceMsSpinner)
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.timeoutMs")), timeoutMsSpinner)
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.contextMaxChars")), contextMaxCharsSpinner)
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.triggerMinPrefixLength")), triggerMinPrefixSpinner)
-                .addLabeledComponent(new JLabel(YlMessageBundle.message("settings.field.disabledExtensions")), disabledExtensionsField)
+                .addLabeledComponent(label("settings.field.maxTokens", "settings.tooltip.maxTokens"), maxTokensSpinner)
+                .addLabeledComponent(label("settings.field.temperature", "settings.tooltip.temperature"), temperatureSpinner)
+                .addLabeledComponent(label("settings.field.topP", "settings.tooltip.topP"), topPSpinner)
+                .addLabeledComponent(label("settings.field.debounceMs", "settings.tooltip.debounceMs"), debounceMsSpinner)
+                .addLabeledComponent(label("settings.field.timeoutMs", "settings.tooltip.timeoutMs"), timeoutMsSpinner)
+                .addLabeledComponent(label("settings.field.contextMaxChars", "settings.tooltip.contextMaxChars"), contextMaxCharsSpinner)
+                .addLabeledComponent(label("settings.field.triggerMinPrefixLength", "settings.tooltip.triggerMinPrefixLength"), triggerMinPrefixSpinner)
+                .addLabeledComponent(label("settings.field.disabledExtensions", "settings.tooltip.disabledExtensions"), disabledExtensionsField)
                 .addSeparator()
                 .addComponent(buttonRow)
                 .addComponentFillVertically(new JPanel(), 0)
@@ -102,6 +94,31 @@ public final class YlCompletionSettingsComponent {
         resetButton.addActionListener(e -> resetToDefaults());
     }
 
+    private void installTooltips() {
+        tooltip(enabledBox, "settings.tooltip.enabled");
+        tooltip(baseUrlField, "settings.tooltip.baseUrl");
+        tooltip(apiKeyField, "settings.tooltip.apiKey");
+        tooltip(modelField, "settings.tooltip.model");
+        tooltip(maxTokensSpinner, "settings.tooltip.maxTokens");
+        tooltip(temperatureSpinner, "settings.tooltip.temperature");
+        tooltip(topPSpinner, "settings.tooltip.topP");
+        tooltip(debounceMsSpinner, "settings.tooltip.debounceMs");
+        tooltip(timeoutMsSpinner, "settings.tooltip.timeoutMs");
+        tooltip(contextMaxCharsSpinner, "settings.tooltip.contextMaxChars");
+        tooltip(triggerMinPrefixSpinner, "settings.tooltip.triggerMinPrefixLength");
+        tooltip(disabledExtensionsField, "settings.tooltip.disabledExtensions");
+    }
+
+    private static void tooltip(@NotNull JComponent component, @NotNull String key) {
+        component.setToolTipText(YlMessageBundle.message(key));
+    }
+
+    private static @NotNull JLabel label(@NotNull String labelKey, @NotNull String tooltipKey) {
+        JLabel label = new JLabel(YlMessageBundle.message(labelKey));
+        label.setToolTipText(YlMessageBundle.message(tooltipKey));
+        return label;
+    }
+
     public JPanel getPanel() {
         return root;
     }
@@ -109,6 +126,7 @@ public final class YlCompletionSettingsComponent {
     public void load(YlCompletionSettingsState state) {
         enabledBox.setSelected(state.enabled);
         baseUrlField.setText(state.baseUrl);
+        apiKeyField.setText(state.apiKey);
         modelField.setText(state.model);
         maxTokensSpinner.setValue(state.maxTokens);
         temperatureSpinner.setValue(state.temperature);
@@ -119,23 +137,12 @@ public final class YlCompletionSettingsComponent {
         triggerMinPrefixSpinner.setValue(state.triggerMinPrefixLength);
         disabledExtensionsField.setText(state.disabledExtensions);
         testStatusLabel.setText(" ");
-
-        // 重置 API Key 输入框：清空、显示 placeholder、不算 dirty
-        suppressDirty = true;
-        try {
-            apiKeyField.setText("");
-            apiKeyField.getEmptyText().setText(state.hasApiKey
-                    ? YlMessageBundle.message("settings.field.apiKey.storedPlaceholder")
-                    : YlMessageBundle.message("settings.field.apiKey.emptyPlaceholder"));
-        } finally {
-            suppressDirty = false;
-            apiKeyDirty = false;
-        }
     }
 
     public void apply(YlCompletionSettingsState state) {
         state.enabled = enabledBox.isSelected();
         state.baseUrl = baseUrlField.getText().trim();
+        state.apiKey = getApiKey().trim();
         state.model = modelField.getText().trim();
         state.maxTokens = ((Number) maxTokensSpinner.getValue()).intValue();
         state.temperature = ((Number) temperatureSpinner.getValue()).doubleValue();
@@ -147,32 +154,15 @@ public final class YlCompletionSettingsComponent {
         state.disabledExtensions = disabledExtensionsField.getText().trim();
     }
 
-    public boolean isApiKeyDirty() {
-        return apiKeyDirty;
-    }
-
-    /** 用户输入的新 API key；apply 后调用方负责重置 dirty 标志。 */
     public String getApiKey() {
         char[] pwd = apiKeyField.getPassword();
         return pwd == null ? "" : new String(pwd);
     }
 
-    public void resetApiKeyDirty(boolean hasApiKey) {
-        suppressDirty = true;
-        try {
-            apiKeyField.setText("");
-            apiKeyField.getEmptyText().setText(hasApiKey
-                    ? YlMessageBundle.message("settings.field.apiKey.storedPlaceholder")
-                    : YlMessageBundle.message("settings.field.apiKey.emptyPlaceholder"));
-        } finally {
-            suppressDirty = false;
-            apiKeyDirty = false;
-        }
-    }
-
     public boolean isModified(YlCompletionSettingsState state) {
         if (state.enabled != enabledBox.isSelected()) return true;
         if (!state.baseUrl.equals(baseUrlField.getText().trim())) return true;
+        if (!state.apiKey.equals(getApiKey().trim())) return true;
         if (!state.model.equals(modelField.getText().trim())) return true;
         if (state.maxTokens != ((Number) maxTokensSpinner.getValue()).intValue()) return true;
         if (Double.compare(state.temperature, ((Number) temperatureSpinner.getValue()).doubleValue()) != 0) return true;
@@ -181,15 +171,12 @@ public final class YlCompletionSettingsComponent {
         if (state.timeoutMs != ((Number) timeoutMsSpinner.getValue()).intValue()) return true;
         if (state.contextMaxChars != ((Number) contextMaxCharsSpinner.getValue()).intValue()) return true;
         if (state.triggerMinPrefixLength != ((Number) triggerMinPrefixSpinner.getValue()).intValue()) return true;
-        if (!state.disabledExtensions.equals(disabledExtensionsField.getText().trim())) return true;
-        return apiKeyDirty;
+        return !state.disabledExtensions.equals(disabledExtensionsField.getText().trim());
     }
 
     private void resetToDefaults() {
-        // 重置时把 keychain 里的 key 也清掉（视为用户主动删除）
         YlCompletionSettingsState defaults = new YlCompletionSettingsState();
         load(defaults);
-        apiKeyDirty = true;
     }
 
     private void testConnection() {
@@ -199,12 +186,10 @@ public final class YlCompletionSettingsComponent {
         String baseUrl = baseUrlField.getText().trim();
         String model = modelField.getText().trim();
         int timeoutMs = ((Number) timeoutMsSpinner.getValue()).intValue();
-        // 用户在输入框输入了新 key → 用新 key 测试；否则用 keychain 缓存里的 key
-        String typedKey = getApiKey();
+        String apiKey = getApiKey().trim();
         ModalityState modality = ModalityState.stateForComponent(root);
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            String apiKey = typedKey.isEmpty() ? YlPasswordSafe.loadApiKey() : typedKey;
             DeepSeekFimClient.getInstance()
                     .testConnection(apiKey, baseUrl, model, timeoutMs)
                     .whenComplete((v, err) ->

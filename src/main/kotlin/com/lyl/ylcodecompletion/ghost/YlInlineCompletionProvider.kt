@@ -12,13 +12,16 @@ import com.intellij.openapi.diagnostic.Logger
 import com.lyl.ylcodecompletion.completion.SuffixDeduplicator
 import com.lyl.ylcodecompletion.completion.YlCompletionContext
 import com.lyl.ylcodecompletion.completion.YlContextBuilder
+import com.lyl.ylcodecompletion.completion.YlSuggestionCache
 import com.lyl.ylcodecompletion.completion.YlTriggerGuard
 import com.lyl.ylcodecompletion.llm.DeepSeekFimClient
 import com.lyl.ylcodecompletion.llm.LlmException
 import com.lyl.ylcodecompletion.llm.LlmRequest
 import com.lyl.ylcodecompletion.settings.YlCompletionSettingsState
-import com.lyl.ylcodecompletion.settings.YlPasswordSafe
 import com.lyl.ylcodecompletion.status.YlBusyState
+import com.lyl.ylcodecompletion.usage.YlUsageStatsState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.future.await
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -54,19 +57,33 @@ class YlInlineCompletionProvider : InlineCompletionProvider {
         }
         if (!allow) return InlineCompletionSuggestion.Empty
 
+        if (request.event is InlineCompletionEvent.DocumentChange && settings.debounceMs > 0) {
+            delay(settings.debounceMs.toLong())
+        }
+
         val ctx: YlCompletionContext = ReadAction.compute<YlCompletionContext, RuntimeException> {
             YlContextBuilder.build(editor, psiFile, caret, settings.contextMaxChars)
         }
 
-        val apiKey = YlPasswordSafe.loadApiKey()
-        if (apiKey.isNullOrBlank()) {
-            warnAuthOnce("API key is empty; open settings to configure")
-            return InlineCompletionSuggestion.Empty
+        if (request.event !is InlineCompletionEvent.DirectCall) {
+            val docText = ReadAction.compute<CharSequence, RuntimeException> {
+                editor.document.immutableCharSequence
+            }
+            val hit = YlSuggestionCache.tryHit(ctx.filePath(), caret, docText)
+            if (hit != null) {
+                val deduped = SuffixDeduplicator.dedup(hit.remaining, ctx.suffix())
+                    ?: return InlineCompletionSuggestion.Empty
+                if (deduped.isBlank()) return InlineCompletionSuggestion.Empty
+                LOG.debug("Inline completion cache hit, remaining=${deduped.length}")
+                return InlineCompletionSingleSuggestion.build(request) {
+                    emit(InlineCompletionGrayTextElement(deduped))
+                }
+            }
         }
 
-        val busy = YlBusyState.getInstance()
-        if (!busy.tryStart()) {
-            LOG.debug("Drop completion request: another in flight")
+        val apiKey = settings.apiKey
+        if (apiKey.isNullOrBlank()) {
+            warnAuthOnce("API key is empty; open settings to configure")
             return InlineCompletionSuggestion.Empty
         }
 
@@ -80,10 +97,15 @@ class YlInlineCompletionProvider : InlineCompletionProvider {
             listOf("\n\n")
         )
 
+        val busy = YlBusyState.getInstance()
+        busy.start()
         val response = try {
             DeepSeekFimClient.getInstance()
                 .complete(llmRequest, apiKey, settings.baseUrl, settings.timeoutMs)
                 .await()
+        } catch (e: CancellationException) {
+            busy.finishCancelled()
+            throw e
         } catch (e: LlmException) {
             busy.finishError()
             handleLlmError(e)
@@ -94,12 +116,24 @@ class YlInlineCompletionProvider : InlineCompletionProvider {
             return InlineCompletionSuggestion.Empty
         }
         busy.finishOk()
+        YlUsageStatsState.getInstance().recordCompletion(response.model ?: settings.model, response.usage)
 
         val raw = response.text
-        if (raw.isBlank()) return InlineCompletionSuggestion.Empty
+        if (raw.isBlank()) {
+            YlSuggestionCache.invalidate()
+            return InlineCompletionSuggestion.Empty
+        }
 
-        val deduped = SuffixDeduplicator.dedup(raw, ctx.suffix()) ?: return InlineCompletionSuggestion.Empty
-        if (deduped.isBlank()) return InlineCompletionSuggestion.Empty
+        val deduped = SuffixDeduplicator.dedup(raw, ctx.suffix())
+        if (deduped == null || deduped.isBlank()) {
+            YlSuggestionCache.invalidate()
+            return InlineCompletionSuggestion.Empty
+        }
+
+        val docTextForUpdate = ReadAction.compute<CharSequence, RuntimeException> {
+            editor.document.immutableCharSequence
+        }
+        YlSuggestionCache.update(ctx.filePath(), caret, docTextForUpdate, deduped)
 
         LOG.debug("Inline completion suggestion length=${deduped.length}, finish=${response.finishReason}")
 

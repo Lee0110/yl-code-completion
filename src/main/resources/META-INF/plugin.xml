@@ -23,6 +23,8 @@
                 serviceImplementation="com.lyl.ylcodecompletion.llm.DeepSeekFimClient"/>
         <applicationService
                 serviceImplementation="com.lyl.ylcodecompletion.status.YlBusyState"/>
+        <applicationService
+                serviceImplementation="com.lyl.ylcodecompletion.usage.YlUsageStatsState"/>
         <applicationConfigurable
                 parentId="tools"
                 id="com.lyl.ylcodecompletion.settings"

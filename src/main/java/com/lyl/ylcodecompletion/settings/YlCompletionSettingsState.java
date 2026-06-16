@@ -14,22 +14,28 @@ import org.jetbrains.annotations.Nullable;
 )
 public final class YlCompletionSettingsState implements PersistentStateComponent<YlCompletionSettingsState> {
 
+    public static final String DEFAULT_BASE_URL = "https://api.deepseek.com/beta";
+    public static final String DEFAULT_MODEL = "deepseek-v4-flash";
+    public static final int DEFAULT_MAX_TOKENS = 64;
+    public static final double DEFAULT_TEMPERATURE = 0.15;
+    public static final double DEFAULT_TOP_P = 0.90;
+    public static final int DEFAULT_DEBOUNCE_MS = 150;
+    public static final int DEFAULT_TIMEOUT_MS = 5000;
+    public static final int DEFAULT_CONTEXT_MAX_CHARS = 4000;
+    public static final int DEFAULT_TRIGGER_MIN_PREFIX_LENGTH = 2;
+
     public boolean enabled = true;
-    public String baseUrl = "https://api.deepseek.com/beta";
-    public String model = "deepseek-v4-pro";
-    public int maxTokens = 128;
-    public double temperature = 0.2;
-    public double topP = 0.95;
-    public int debounceMs = 300;
-    public int timeoutMs = 8000;
-    public int contextMaxChars = 4000;
-    public int triggerMinPrefixLength = 1;
+    public String baseUrl = DEFAULT_BASE_URL;
+    public String apiKey = "";
+    public String model = DEFAULT_MODEL;
+    public int maxTokens = DEFAULT_MAX_TOKENS;
+    public double temperature = DEFAULT_TEMPERATURE;
+    public double topP = DEFAULT_TOP_P;
+    public int debounceMs = DEFAULT_DEBOUNCE_MS;
+    public int timeoutMs = DEFAULT_TIMEOUT_MS;
+    public int contextMaxChars = DEFAULT_CONTEXT_MAX_CHARS;
+    public int triggerMinPrefixLength = DEFAULT_TRIGGER_MIN_PREFIX_LENGTH;
     public String disabledExtensions = "";
-    /**
-     * 标记 keychain 里是否存有 API key，用于 UI 显示 "&lt;stored&gt;" 占位，
-     * 避免每次打开设置页都去读 keychain 弹密码框。
-     */
-    public boolean hasApiKey = false;
 
     public static YlCompletionSettingsState getInstance() {
         return ApplicationManager.getApplication().getService(YlCompletionSettingsState.class);

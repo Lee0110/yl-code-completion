@@ -34,15 +34,6 @@ public final class YlCompletionSettingsConfigurable implements Configurable {
         if (component == null) return;
         YlCompletionSettingsState state = YlCompletionSettingsState.getInstance();
         component.apply(state);
-
-        if (component.isApiKeyDirty()) {
-            String typed = component.getApiKey();
-            String toStore = typed.isEmpty() ? null : typed;
-            state.hasApiKey = toStore != null;
-            // 写 keychain 是慢操作，丢后台
-            YlPasswordSafe.storeApiKeyAsync(toStore);
-            component.resetApiKeyDirty(state.hasApiKey);
-        }
     }
 
     @Override
