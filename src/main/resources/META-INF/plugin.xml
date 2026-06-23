@@ -35,7 +35,7 @@
         <statusBarWidgetFactory
                 id="YlCodeCompletion.StatusBar"
                 implementation="com.lyl.ylcodecompletion.status.YlStatusBarWidgetFactory"
-                order="last"/>
+                order="before Memory"/>
     </extensions>
 
     <actions>
